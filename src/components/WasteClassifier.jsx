@@ -17,8 +17,8 @@ const WasteClassifier = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const navigate = useNavigate();
 
-  // Add new state for API URL
-  const [apiUrl] = useState(import.meta.env.VITE_API_URL || 'https://your-backend-url.com');
+  // Remove the hardcoded fallback URL
+  const [apiUrl] = useState(import.meta.env.VITE_API_URL || window.location.origin);
 
   // Check for dark mode preference on mount
   useEffect(() => {
@@ -75,8 +75,7 @@ const WasteClassifier = () => {
     setBadgeNotification(null);
 
     try {
-      // Log API URL
-      console.log('Using API URL:', apiUrl);
+      console.log('Making request to:', apiUrl); // Debug log
 
       // Check authentication
       const { data: { session }, error: authError } = await supabase.auth.getSession();
@@ -146,6 +145,7 @@ const WasteClassifier = () => {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session.access_token}`,
         },
+        credentials: 'include', // Include credentials if needed
         body: JSON.stringify({
           imageBase64,
           userLocation,
