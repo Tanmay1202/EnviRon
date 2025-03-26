@@ -15,21 +15,42 @@ const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     'Accept': 'application/json',
   },
   db: {
-    fetchTimeout: 10000, // Increase timeout to 10 seconds
+    fetchTimeout: 20000, // Increase timeout to 20 seconds
   },
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true
+  }
 });
 
-// Retry logic for Supabase queries
-const withRetry = async (fn, retries = 3, delay = 1000) => {
-  for (let i = 0; i < retries; i++) {
+// Update retry logic
+const withRetry = async (fn, options = {}) => {
+  const {
+    maxRetries = 3,
+    delayMs = 1000,
+    timeoutMs = 20000
+  } = options;
+
+  let lastError;
+  
+  for (let i = 0; i < maxRetries; i++) {
     try {
-      return await fn();
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error(`Operation timed out after ${timeoutMs}ms`)), timeoutMs);
+      });
+
+      return await Promise.race([fn(), timeoutPromise]);
     } catch (err) {
-      if (i === retries - 1) throw err;
-      console.warn(`Supabase: Retry ${i + 1}/${retries} after error: ${err.message}`);
-      await new Promise((resolve) => setTimeout(resolve, delay));
+      lastError = err;
+      if (i === maxRetries - 1) break;
+      
+      console.warn(`Retry ${i + 1}/${maxRetries} after error: ${err.message}`);
+      await new Promise(resolve => setTimeout(resolve, delayMs * (i + 1))); // Exponential backoff
     }
   }
+  
+  throw lastError;
 };
 
 // Test Supabase connection with a timeout
