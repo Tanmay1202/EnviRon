@@ -58,7 +58,7 @@ const WasteClassifier = () => {
     }
   };
 
-  // Modify handleClassify function
+  // Classify the waste item using the backend server and update user progress
   const handleClassify = async () => {
     if (!image) {
       setError('Please upload an image to classify.');
@@ -72,10 +72,7 @@ const WasteClassifier = () => {
     setBadgeNotification(null);
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('Authentication required');
-      }
+      const { data: { user } } = await supabase.auth.getUser();
 
       // Get user location
       let userLocation;
@@ -86,15 +83,14 @@ const WasteClassifier = () => {
               lat: position.coords.latitude,
               lng: position.coords.longitude,
             }),
-            (err) => reject(new Error('Location access denied'))
+            (err) => reject(err)
           );
         });
       } catch (err) {
-        console.warn('Location error:', err);
-        throw new Error('Location access is required for waste classification');
+        throw new Error('Failed to get your location. Please enable location services.');
       }
 
-      // Convert image to base64
+      // Convert the image to base64 for the backend
       const imageBase64 = await new Promise((resolve) => {
         const reader = new FileReader();
         reader.onloadend = () => resolve(reader.result.split(',')[1]);
@@ -110,81 +106,225 @@ const WasteClassifier = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`
         },
-        body: JSON.stringify({
-          imageBase64,
-          userLocation
-        })
+        body: JSON.stringify({ imageBase64, userLocation }),
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(errorData.error || `Server error: ${response.status}`);
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to classify image');
       }
 
-      const data = await response.json();
-      console.log('Backend response:', data);
+      const { labels, wasteType, locations } = await response.json();
+      console.log('Backend Response:', { labels, wasteType, locations }); // For debugging
 
-      // Set the result
-      setResult({
-        classification: data.labels[0] || 'Unknown',
-        wasteType: data.wasteType,
-        locations: data.locations || [],
-        instructions: getDisposalInstructions(data.wasteType),
-        tip: getWasteReductionTip(data.wasteType)
+      // Map waste type to classification details
+      const classificationMap = {
+        'plastic bottle': { isRecyclable: true, material: 'Plastic', instructions: 'Remove cap and label, rinse thoroughly, then place in blue recycling bin.', tip: 'Use a reusable water bottle to reduce plastic waste.' },
+        'bottle': { isRecyclable: true, material: 'Plastic', instructions: 'Remove cap and label, rinse thoroughly, then place in blue recycling bin.', tip: 'Use a reusable water bottle to reduce plastic waste.' },
+        'can': { isRecyclable: true, material: 'Aluminum', instructions: 'Rinse to remove any residue, then place in blue recycling bin.', tip: 'Opt for bulk purchases to reduce packaging waste.' },
+        'paper': { isRecyclable: true, material: 'Paper', instructions: 'Ensure it\'s clean and free of food residue, then place in blue recycling bin.', tip: 'Switch to digital documents to reduce paper usage.' },
+        'food': { isRecyclable: false, material: 'Organic Waste', instructions: 'Dispose in green compost bin if available, or in black landfill bin.', tip: 'Compost food scraps to reduce landfill waste.' },
+        'wrapper': { isRecyclable: false, material: 'Plastic Film', instructions: 'Dispose in black landfill bin. Plastic films are not recyclable in most curbside programs.', tip: 'Use reusable containers to avoid plastic wrappers.' },
+        'plastic': { isRecyclable: true, material: 'Plastic', instructions: 'Rinse and place in blue recycling bin if accepted locally.', tip: 'Reduce plastic use by choosing reusable alternatives.' },
+        'glass': { isRecyclable: true, material: 'Glass', instructions: 'Rinse and place in blue recycling bin if accepted locally.', tip: 'Reuse glass containers to reduce waste.' },
+        'metal': { isRecyclable: true, material: 'Metal', instructions: 'Rinse and place in blue recycling bin.', tip: 'Opt for products with minimal packaging.' },
+        'organic': { isRecyclable: false, material: 'Organic Waste', instructions: 'Dispose in green compost bin if available, or in black landfill bin.', tip: 'Compost organic waste to reduce landfill impact.' },
+        'battery': { isRecyclable: false, material: 'Hazardous Waste', instructions: 'Take to a hazardous waste facility or battery recycling drop-off.', tip: 'Use rechargeable batteries to reduce waste.' },
+        'electronics': { isRecyclable: false, material: 'Hazardous Waste', instructions: 'Take to an e-waste recycling center.', tip: 'Donate working electronics to extend their lifespan.' },
+        'chemical': { isRecyclable: false, material: 'Hazardous Waste', instructions: 'Dispose at a hazardous waste facility.', tip: 'Use eco-friendly alternatives to reduce chemical use.' },
+        'paint': { isRecyclable: false, material: 'Hazardous Waste', instructions: 'Dispose at a hazardous waste facility.', tip: 'Buy only what you need to avoid excess paint.' },
+        'clothes': { isRecyclable: false, material: 'Donatable', instructions: 'Donate to a thrift store or charity if in good condition.', tip: 'Buy second-hand clothes to reduce textile waste.' },
+        'furniture': { isRecyclable: false, material: 'Donatable', instructions: 'Donate to a thrift store or charity if in good condition.', tip: 'Upcycle old furniture to give it a new life.' },
+        'book': { isRecyclable: false, material: 'Donatable', instructions: 'Donate to a library, school, or charity.', tip: 'Share books with friends to reduce waste.' }
+      };
+
+      let classificationResult, disposalInstructions, wasteReductionTip, itemName;
+      const matchedLabel = labels.find(label => Object.keys(classificationMap).some(key => label.includes(key)));
+      if (matchedLabel) {
+        const matchedKey = Object.keys(classificationMap).find(key => matchedLabel.includes(key));
+        const itemData = classificationMap[matchedKey];
+        itemName = matchedKey;
+        classificationResult = itemData.isRecyclable ? `Recyclable - ${itemData.material}` : `Non-Recyclable - ${itemData.material}`;
+        disposalInstructions = itemData.instructions;
+        wasteReductionTip = itemData.tip;
+      } else {
+        itemName = 'unknown';
+        classificationResult = 'Non-Recyclable - Unknown Material';
+        disposalInstructions = 'Dispose in black landfill bin.';
+        wasteReductionTip = 'Consider researching the item\'s recyclability or reducing its use.';
+      }
+
+      // Upload the image to Supabase Storage
+      const fileExt = image.name.split('.').pop();
+      const fileName = `${user.id}/${Date.now()}.${fileExt}`;
+      const { error: uploadError } = await supabase.storage
+        .from('waste-images')
+        .upload(fileName, image);
+
+      if (uploadError) {
+        throw new Error(
+          uploadError.message.includes('permission')
+            ? 'You do not have permission to upload to this folder. Please contact support.'
+            : 'Failed to upload image. Please check your internet connection and try again.'
+        );
+      }
+
+      const { data: urlData } = supabase.storage
+        .from('waste-images')
+        .getPublicUrl(fileName);
+
+      const imageUrl = urlData.publicUrl;
+
+      // Save the classification result to the database
+      const weight = classificationResult.includes('Recyclable') ? 0.1 : 0;
+      const { error: insertError } = await supabase.from('classifications').insert({
+        user_id: user.id,
+        item: itemName,
+        result: classificationResult,
+        image_url: imageUrl,
+        weight,
       });
 
-      // Update user progress in Supabase
-      try {
-        const { error: classificationError } = await supabase
-          .from('classifications')
-          .insert({
-            user_id: session.user.id,
-            item: data.labels[0] || 'Unknown',
-            result: data.wasteType,
-            weight: data.wasteType.toLowerCase().includes('recyclable') ? 0.1 : 0
-          });
-
-        if (classificationError) {
-          console.error('Error saving classification:', classificationError);
-        }
-
-        // Update user points and badges
-        const { data: userData, error: userError } = await supabase
-          .from('users')
-          .select('points, badges')
-          .eq('id', session.user.id)
-          .single();
-
-        if (!userError && userData) {
-          const newPoints = (userData.points || 0) + 
-            (data.wasteType.toLowerCase().includes('recyclable') ? 20 : 5);
-          let badges = userData.badges || [];
-
-          if (data.wasteType.toLowerCase().includes('recyclable') && !badges.includes('Eco-Warrior')) {
-            badges.push('Eco-Warrior');
-            setBadgeNotification('Eco-Warrior');
-          }
-
-          await supabase
-            .from('users')
-            .update({ 
-              points: newPoints,
-              badges 
-            })
-            .eq('id', session.user.id);
-        }
-      } catch (dbError) {
-        console.error('Database error:', dbError);
+      if (insertError) {
+        throw new Error('Failed to save classification: ' + insertError.message);
       }
 
-      toast.success('Waste classified successfully!');
+      // Update challenge progress for "Eco-Warrior" if the item is recyclable
+      if (classificationResult.includes('Recyclable')) {
+        const { data: challengeData, error: challengeError } = await supabase
+          .from('challenges')
+          .select('id, goal')
+          .eq('name', 'Eco-Warrior')
+          .single();
 
+        if (challengeError) {
+          throw new Error('Failed to fetch challenge data: ' + challengeError.message);
+        }
+
+        if (challengeData) {
+          const { data: userChallengeData, error: userChallengeError } = await supabase
+            .from('challenge_participants')
+            .select('progress')
+            .eq('user_id', user.id)
+            .eq('challenge_id', challengeData.id);
+
+          if (userChallengeError) {
+            throw new Error('Failed to fetch challenge progress: ' + userChallengeError.message);
+          }
+
+          const userChallenge = userChallengeData.length > 0 ? userChallengeData[0] : null;
+          let newProgress = (userChallenge?.progress || 0) + weight;
+          if (newProgress >= challengeData.goal) {
+            newProgress = challengeData.goal;
+          }
+
+          const { error: upsertChallengeError } = await supabase
+            .from('challenge_participants')
+            .upsert({
+              user_id: user.id,
+              challenge_id: challengeData.id,
+              progress: newProgress,
+              completed: newProgress >= challengeData.goal,
+            }, {
+              onConflict: ['user_id', 'challenge_id']
+            });
+
+          if (upsertChallengeError) {
+            throw new Error('Failed to update challenge progress: ' + upsertChallengeError.message);
+          }
+
+          if (newProgress >= challengeData.goal) {
+            const { data: userData, error: userDataError } = await supabase
+              .from('users')
+              .select('badges, level')
+              .eq('id', user.id)
+              .single();
+
+            if (userDataError) {
+              throw new Error('Failed to fetch user data for badge update: ' + userDataError.message);
+            }
+
+            let badges = userData.badges || [];
+            let currentLevel = userData.level || 1;
+            if (!badges.includes('Eco-Warrior')) {
+              badges.push('Eco-Warrior');
+              if (currentLevel < 1) {
+                currentLevel = 1;
+              }
+              const { error: badgeUpdateError } = await supabase
+                .from('users')
+                .update({ badges, level: currentLevel })
+                .eq('id', user.id);
+
+              if (badgeUpdateError) {
+                throw new Error('Failed to award badge: ' + badgeUpdateError.message);
+              }
+              setBadgeNotification('Eco-Warrior');
+              toast.success('Congratulations! You earned the "Eco-Warrior" badge!');
+            }
+          }
+        }
+      }
+
+      // Update user points and check for additional badges
+      const { data: userData, error: fetchError } = await supabase
+        .from('users')
+        .select('points, badges')
+        .eq('id', user.id)
+        .single();
+
+      if (fetchError) {
+        throw new Error('Failed to fetch user data: ' + fetchError.message);
+      }
+
+      const newPoints = (userData.points || 0) + (classificationResult.includes('Recyclable') ? 20 : 5);
+      let badges = userData.badges || [];
+
+      const { data: recyclableCountData, error: recyclableCountError } = await supabase
+        .from('classifications')
+        .select('id')
+        .eq('user_id', user.id)
+        .ilike('result', 'Recyclable%');
+
+      if (recyclableCountError) {
+        throw new Error('Failed to fetch recyclable count: ' + recyclableCountError.message);
+      }
+
+      if (recyclableCountData.length >= 10 && !badges.includes('Recycler Pro')) {
+        badges.push('Recycler Pro');
+        setBadgeNotification('Recycler Pro');
+        toast.success('Congratulations! You earned the "Recycler Pro" badge!');
+      }
+
+      const co2Saved = recyclableCountData.length * 0.2;
+      if (co2Saved >= 5 && !badges.includes('Climate Champion')) {
+        badges.push('Climate Champion');
+        setBadgeNotification('Climate Champion');
+        toast.success('Congratulations! You earned the "Climate Champion" badge!');
+      }
+
+      const { error: updateError } = await supabase
+        .from('users')
+        .update({ points: newPoints, badges })
+        .eq('id', user.id);
+
+      if (updateError) {
+        throw new Error('Failed to update user data: ' + updateError.message);
+      }
+
+      // Set the classification result for display
+      setResult({
+        classification: classificationResult,
+        instructions: disposalInstructions,
+        tip: wasteReductionTip,
+        wasteType,
+        locations,
+      });
+      toast.success('Waste classified successfully!');
     } catch (err) {
-      console.error('Classification error:', err);
-      setError(err.message || 'Failed to classify image. Please try again.');
-      toast.error(err.message || 'Failed to classify image. Please try again.');
+      setError(err.message || 'An unexpected error occurred. Please try again.');
+      toast.error(err.message || 'An unexpected error occurred. Please try again.');
     } finally {
       setLoading(false);
     }

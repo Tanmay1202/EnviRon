@@ -2,7 +2,6 @@
 const express = require('express');
 const vision = require('@google-cloud/vision');
 const dotenv = require('dotenv');
-
 const cors = require('cors');
 const { Client } = require('@googlemaps/google-maps-services-js');
 
@@ -16,7 +15,7 @@ const googleMapsClient = new Client({});
 
 // Use CORS middleware to allow requests from your frontend
 app.use(cors({
-  origin: ['https://environ-pi.vercel.app', 'http://localhost:3000'],
+  origin: '*', // Allow all origins during development
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
