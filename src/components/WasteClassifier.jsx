@@ -97,26 +97,27 @@ const WasteClassifier = () => {
         reader.readAsDataURL(image);
       });
 
-      // Get the backend URL from environment variables
-      const backendUrl = import.meta.env.VITE_BACKEND_URL;
+      // Get the backend URL from environment variables or use a default
+      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'https://your-backend-url.com';
       console.log('Using backend URL:', backendUrl);
 
       // Call the backend API
-      const response = await fetch(`${backendUrl}/classify-waste`, {
+      const response = await fetch(`${backendUrl}/api/classify-waste`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
         },
         body: JSON.stringify({ imageBase64, userLocation }),
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to classify image');
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || `Server error: ${response.status}`);
       }
 
-      const { labels, wasteType, locations } = await response.json();
-      console.log('Backend Response:', { labels, wasteType, locations }); // For debugging
+      const data = await response.json();
+      console.log('Backend response:', data);
 
       // Map waste type to classification details
       const classificationMap = {
@@ -140,7 +141,7 @@ const WasteClassifier = () => {
       };
 
       let classificationResult, disposalInstructions, wasteReductionTip, itemName;
-      const matchedLabel = labels.find(label => Object.keys(classificationMap).some(key => label.includes(key)));
+      const matchedLabel = data.labels.find(label => Object.keys(classificationMap).some(key => label.includes(key)));
       if (matchedLabel) {
         const matchedKey = Object.keys(classificationMap).find(key => matchedLabel.includes(key));
         const itemData = classificationMap[matchedKey];
@@ -318,8 +319,8 @@ const WasteClassifier = () => {
         classification: classificationResult,
         instructions: disposalInstructions,
         tip: wasteReductionTip,
-        wasteType,
-        locations,
+        wasteType: data.wasteType,
+        locations: data.locations || [],
       });
       toast.success('Waste classified successfully!');
     } catch (err) {

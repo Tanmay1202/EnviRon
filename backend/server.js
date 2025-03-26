@@ -15,7 +15,7 @@ const googleMapsClient = new Client({});
 
 // Use CORS middleware to allow requests from your frontend
 app.use(cors({
-  origin: '*', // Allow all origins during development
+  origin: ['https://environ-pi.vercel.app', 'http://localhost:5173'],
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
