@@ -17,9 +17,6 @@ const WasteClassifier = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const navigate = useNavigate();
 
-  // Remove the hardcoded fallback URL
-  const [apiUrl] = useState(import.meta.env.VITE_API_URL || window.location.origin);
-
   // Check for dark mode preference on mount
   useEffect(() => {
     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -75,31 +72,50 @@ const WasteClassifier = () => {
     setBadgeNotification(null);
 
     try {
-      // Use the current origin as the API base URL
-      const apiBaseUrl = window.location.origin;
-      console.log('Using API URL:', apiBaseUrl); // Debug log
-
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         throw new Error('Authentication required');
       }
 
+      // Get user location
+      let userLocation;
+      try {
+        userLocation = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(
+            (position) => resolve({
+              lat: position.coords.latitude,
+              lng: position.coords.longitude,
+            }),
+            (err) => reject(new Error('Location access denied'))
+          );
+        });
+      } catch (err) {
+        console.warn('Location error:', err);
+        throw new Error('Location access is required for waste classification');
+      }
+
+      // Convert image to base64
       const imageBase64 = await new Promise((resolve) => {
         const reader = new FileReader();
         reader.onloadend = () => resolve(reader.result.split(',')[1]);
         reader.readAsDataURL(image);
       });
 
-      const response = await fetch(`${apiBaseUrl}/api/classify-waste`, {
+      // Get the backend URL from environment variables
+      const backendUrl = import.meta.env.VITE_BACKEND_URL;
+      console.log('Using backend URL:', backendUrl);
+
+      // Call the backend API
+      const response = await fetch(`${backendUrl}/classify-waste`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
+          'Authorization': `Bearer ${session.access_token}`
         },
         body: JSON.stringify({
           imageBase64,
-          userId: session.user.id,
-        }),
+          userLocation
+        })
       });
 
       if (!response.ok) {
@@ -108,27 +124,62 @@ const WasteClassifier = () => {
       }
 
       const data = await response.json();
-      
-      // Process successful response
-      const classificationResult = {
-        classification: data.labels[0],
+      console.log('Backend response:', data);
+
+      // Set the result
+      setResult({
+        classification: data.labels[0] || 'Unknown',
         wasteType: data.wasteType,
         locations: data.locations || [],
         instructions: getDisposalInstructions(data.wasteType),
-        tip: getWasteReductionTip(data.wasteType),
-      };
+        tip: getWasteReductionTip(data.wasteType)
+      });
 
-      setResult(classificationResult);
-      toast.success('Waste classified successfully!');
-
-      // Update user progress and check for badges
+      // Update user progress in Supabase
       try {
-        await updateUserProgress(session.user.id, data.wasteType);
-      } catch (err) {
-        console.error('Failed to update progress:', err);
-        // Don't throw here, as the main classification was successful
-        toast.warning('Progress update failed. Please try again later.');
+        const { error: classificationError } = await supabase
+          .from('classifications')
+          .insert({
+            user_id: session.user.id,
+            item: data.labels[0] || 'Unknown',
+            result: data.wasteType,
+            weight: data.wasteType.toLowerCase().includes('recyclable') ? 0.1 : 0
+          });
+
+        if (classificationError) {
+          console.error('Error saving classification:', classificationError);
+        }
+
+        // Update user points and badges
+        const { data: userData, error: userError } = await supabase
+          .from('users')
+          .select('points, badges')
+          .eq('id', session.user.id)
+          .single();
+
+        if (!userError && userData) {
+          const newPoints = (userData.points || 0) + 
+            (data.wasteType.toLowerCase().includes('recyclable') ? 20 : 5);
+          let badges = userData.badges || [];
+
+          if (data.wasteType.toLowerCase().includes('recyclable') && !badges.includes('Eco-Warrior')) {
+            badges.push('Eco-Warrior');
+            setBadgeNotification('Eco-Warrior');
+          }
+
+          await supabase
+            .from('users')
+            .update({ 
+              points: newPoints,
+              badges 
+            })
+            .eq('id', session.user.id);
+        }
+      } catch (dbError) {
+        console.error('Database error:', dbError);
       }
+
+      toast.success('Waste classified successfully!');
 
     } catch (err) {
       console.error('Classification error:', err);
@@ -137,77 +188,6 @@ const WasteClassifier = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  // New helper function for updating user progress
-  const updateUserProgress = async (userId, wasteType) => {
-    const isRecyclable = wasteType.toLowerCase() === 'recyclable';
-    const weight = isRecyclable ? 0.1 : 0;
-
-    const { error: updateError } = await supabase
-      .from('classifications')
-      .insert({
-        user_id: userId,
-        item: wasteType,
-        result: isRecyclable ? 'Recyclable' : 'Non-Recyclable',
-        weight,
-      });
-
-    if (updateError) {
-      throw new Error('Failed to save classification');
-    }
-
-    // Check and update badges
-    const { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('points, badges')
-      .eq('id', userId)
-        .single();
-
-    if (userError) {
-      throw new Error('Failed to fetch user data');
-      }
-
-    const newPoints = (userData.points || 0) + (isRecyclable ? 20 : 5);
-      let badges = userData.badges || [];
-
-    // Add badge logic here
-    if (isRecyclable && !badges.includes('Eco-Warrior')) {
-      badges.push('Eco-Warrior');
-      setBadgeNotification('Eco-Warrior');
-    }
-
-    const { error: pointsError } = await supabase
-        .from('users')
-        .update({ points: newPoints, badges })
-      .eq('id', userId);
-
-    if (pointsError) {
-      throw new Error('Failed to update points');
-    }
-  };
-
-  // Helper functions for instructions and tips
-  const getDisposalInstructions = (wasteType) => {
-    const instructions = {
-      recyclable: 'Clean and place in the recycling bin',
-      organic: 'Place in the compost bin',
-      hazardous: 'Take to a hazardous waste facility',
-      landfill: 'Place in the general waste bin',
-      // Add more waste types as needed
-    };
-    return instructions[wasteType.toLowerCase()] || 'Check local disposal guidelines';
-  };
-
-  const getWasteReductionTip = (wasteType) => {
-    const tips = {
-      recyclable: 'Consider reusable alternatives',
-      organic: 'Try composting at home',
-      hazardous: 'Look for eco-friendly alternatives',
-      landfill: 'Look for recyclable alternatives',
-      // Add more waste types as needed
-    };
-    return tips[wasteType.toLowerCase()] || 'Reduce, Reuse, Recycle when possible';
   };
 
   // Toggle dark mode
