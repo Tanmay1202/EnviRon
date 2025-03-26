@@ -75,101 +75,40 @@ const WasteClassifier = () => {
     setBadgeNotification(null);
 
     try {
-      console.log('Making request to:', apiUrl); // Debug log
+      // Use the current origin as the API base URL
+      const apiBaseUrl = window.location.origin;
+      console.log('Using API URL:', apiBaseUrl); // Debug log
 
-      // Check authentication
-      const { data: { session }, error: authError } = await supabase.auth.getSession();
-      console.log('Auth session:', session);
-      if (authError || !session) {
-        throw new Error('Authentication required. Please sign in again.');
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('Authentication required');
       }
 
-      // Log image processing
-      console.log('Processing image...');
-      const imageBase64 = await new Promise((resolve, reject) => {
+      const imageBase64 = await new Promise((resolve) => {
         const reader = new FileReader();
-        reader.onloadend = () => {
-          try {
-            const base64 = reader.result.split(',')[1];
-            console.log('Image processed successfully');
-            if (!base64) {
-              reject(new Error('Failed to process image'));
-            }
-            resolve(base64);
-          } catch (err) {
-            console.error('Image processing error:', err);
-            reject(new Error('Failed to process image'));
-          }
-        };
-        reader.onerror = () => reject(new Error('Failed to read image'));
+        reader.onloadend = () => resolve(reader.result.split(',')[1]);
         reader.readAsDataURL(image);
       });
 
-      // Log location attempt
-      console.log('Getting location...');
-      let userLocation = null;
-      try {
-        userLocation = await Promise.race([
-          new Promise((resolve, reject) => {
-            navigator.geolocation.getCurrentPosition(
-              (position) => {
-                console.log('Location obtained:', position);
-                resolve({
-                  lat: position.coords.latitude,
-                  lng: position.coords.longitude,
-                });
-              },
-              (err) => {
-                console.error('Location error:', err);
-                reject(new Error('Location access denied'));
-              }
-            );
-          }),
-          new Promise((_, reject) => 
-            setTimeout(() => {
-              console.log('Location timeout');
-              reject(new Error('Location request timed out'));
-            }, 5000)
-          )
-        ]);
-      } catch (err) {
-        console.warn('Location error:', err.message);
-        toast.warning('Unable to get location. Some features may be limited.');
-      }
-
-      // Log API request
-      console.log('Making API request to:', `${apiUrl}/api/classify-waste`);
-      const response = await fetch(`${apiUrl}/api/classify-waste`, {
+      const response = await fetch(`${apiBaseUrl}/api/classify-waste`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session.access_token}`,
         },
-        credentials: 'include', // Include credentials if needed
         body: JSON.stringify({
           imageBase64,
-          userLocation,
           userId: session.user.id,
         }),
       });
 
-      console.log('API response status:', response.status);
-      console.log('API response headers:', response.headers);
-
-      // Check if response is JSON
-      const contentType = response.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        const text = await response.text();
-        console.error('Non-JSON response:', text);
-        throw new Error('Server returned an invalid response format');
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || `Server error: ${response.status}`);
       }
 
-      // Validate response format
       const data = await response.json();
-      if (!data || !data.labels || !data.wasteType) {
-        throw new Error('Invalid response format from server');
-      }
-
+      
       // Process successful response
       const classificationResult = {
         classification: data.labels[0],
