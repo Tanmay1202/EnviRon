@@ -98,7 +98,7 @@ const WasteClassifier = () => {
       });
 
       // Call the backend server using a relative URL (proxied by Vite)
-      const response = await fetch('/api/classify-waste', {
+      const response = await fetch('/classify-waste', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
