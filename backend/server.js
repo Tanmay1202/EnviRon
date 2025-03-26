@@ -2,15 +2,12 @@
 const express = require('express');
 const vision = require('@google-cloud/vision');
 const dotenv = require('dotenv');
+
 const cors = require('cors');
 const { Client } = require('@googlemaps/google-maps-services-js');
 
 const app = express();
-const port = 3000;
-
-// Load environment variables from .env file
-dotenv.config();
-
+ 
 // Initialize Vision API client
 const visionClient = new vision.ImageAnnotatorClient();
 
@@ -19,10 +16,8 @@ const googleMapsClient = new Client({});
 
 // Use CORS middleware to allow requests from your frontend
 app.use(cors({
-  origin: [
-    'https://5173-idx-environ-1742316025738.cluster-mwrgkbggpvbq6tvtviraw2knqg.cloudworkstations.dev',
-    'http://localhost:5173',
-  ],
+  origin: ['https://environ.vercel.app'],
+
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type'],
 }));
@@ -144,6 +139,10 @@ app.post('/classify-waste', async (req, res) => {
 });
 
 // Start the server
-app.listen(port, () => {
-  console.log(`Server running on http://localhost:${port}`);
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
 });
+
+
+
