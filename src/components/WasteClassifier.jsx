@@ -75,23 +75,30 @@ const WasteClassifier = () => {
     setBadgeNotification(null);
 
     try {
-      // Get user session
+      // Log API URL
+      console.log('Using API URL:', apiUrl);
+
+      // Check authentication
       const { data: { session }, error: authError } = await supabase.auth.getSession();
+      console.log('Auth session:', session);
       if (authError || !session) {
         throw new Error('Authentication required. Please sign in again.');
       }
 
-      // Get image data with error handling
+      // Log image processing
+      console.log('Processing image...');
       const imageBase64 = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onloadend = () => {
           try {
             const base64 = reader.result.split(',')[1];
+            console.log('Image processed successfully');
             if (!base64) {
               reject(new Error('Failed to process image'));
             }
             resolve(base64);
           } catch (err) {
+            console.error('Image processing error:', err);
             reject(new Error('Failed to process image'));
           }
         };
@@ -99,74 +106,69 @@ const WasteClassifier = () => {
         reader.readAsDataURL(image);
       });
 
-      // Get location with timeout and error handling
+      // Log location attempt
+      console.log('Getting location...');
       let userLocation = null;
       try {
         userLocation = await Promise.race([
           new Promise((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(
-            (position) => resolve({
-              lat: position.coords.latitude,
-              lng: position.coords.longitude,
-            }),
-              (err) => reject(new Error('Location access denied'))
+            navigator.geolocation.getCurrentPosition(
+              (position) => {
+                console.log('Location obtained:', position);
+                resolve({
+                  lat: position.coords.latitude,
+                  lng: position.coords.longitude,
+                });
+              },
+              (err) => {
+                console.error('Location error:', err);
+                reject(new Error('Location access denied'));
+              }
             );
           }),
           new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Location request timed out')), 5000)
+            setTimeout(() => {
+              console.log('Location timeout');
+              reject(new Error('Location request timed out'));
+            }, 5000)
           )
         ]);
       } catch (err) {
         console.warn('Location error:', err.message);
-        // Continue without location, but notify user
         toast.warning('Unable to get location. Some features may be limited.');
       }
 
-      // Make API request with retry logic
-      const makeRequest = async (retries = 3) => {
-        for (let i = 0; i < retries; i++) {
-          try {
-            const response = await fetch(`${apiUrl}/api/classify-waste`, {
+      // Log API request
+      console.log('Making API request to:', `${apiUrl}/api/classify-waste`);
+      const response = await fetch(`${apiUrl}/api/classify-waste`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-                'Authorization': `Bearer ${session.access_token}`,
-              },
-              body: JSON.stringify({
-                imageBase64,
-                userLocation,
-                userId: session.user.id,
-              }),
-            });
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          imageBase64,
+          userLocation,
+          userId: session.user.id,
+        }),
+      });
 
-            // Check for various response scenarios
-      if (!response.ok) {
-              const contentType = response.headers.get('content-type');
-              if (contentType?.includes('application/json')) {
-        const errorData = await response.json();
-                throw new Error(errorData.error || `Server error: ${response.status}`);
-              } else {
-                const text = await response.text();
-                throw new Error(`Server error: ${text || response.status}`);
-              }
-            }
+      console.log('API response status:', response.status);
+      console.log('API response headers:', response.headers);
 
-            // Validate response format
-            const data = await response.json();
-            if (!data || !data.labels || !data.wasteType) {
-              throw new Error('Invalid response format from server');
-            }
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text();
+        console.error('Non-JSON response:', text);
+        throw new Error('Server returned an invalid response format');
+      }
 
-            return data;
-          } catch (err) {
-            if (i === retries - 1) throw err;
-            console.warn(`Retry ${i + 1}/${retries} after error:`, err.message);
-            await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
-          }
-        }
-      };
-
-      const data = await makeRequest();
+      // Validate response format
+      const data = await response.json();
+      if (!data || !data.labels || !data.wasteType) {
+        throw new Error('Invalid response format from server');
+      }
 
       // Process successful response
       const classificationResult = {
