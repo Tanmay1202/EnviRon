@@ -97,8 +97,8 @@ const WasteClassifier = () => {
         reader.readAsDataURL(image);
       });
 
-      // Call the backend server using a relative URL (proxied by Vite)
-      const response = await fetch('/classify-waste', {
+      // Call the backend server using the updated URL
+      const response = await fetch('/api/classify-waste', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

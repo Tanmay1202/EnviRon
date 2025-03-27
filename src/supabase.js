@@ -21,6 +21,9 @@ const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true
+  },
+  realtime: {
+    enabled: false // Disable real-time to stop WebSocket errors
   }
 });
 
