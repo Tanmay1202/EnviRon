@@ -4,4 +4,5 @@ dist/
 .env
 vision-api-key.json
 backend/vision-api-key.json
-backend/.env
+backend/.envapi/service-account.json
+api/service-account.json

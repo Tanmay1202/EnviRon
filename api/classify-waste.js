@@ -2,8 +2,21 @@ const vision = require('@google-cloud/vision');
 const { Client } = require('@googlemaps/google-maps-services-js');
 const cors = require('cors')({ origin: true });
 
+// Parse the JSON credentials from the environment variable
+const credentialsJson = process.env.GOOGLE_CLOUD_CREDENTIALS_JSON;
+if (!credentialsJson) {
+  throw new Error('GOOGLE_CLOUD_CREDENTIALS_JSON environment variable is not set');
+}
+
+let credentials;
+try {
+  credentials = JSON.parse(credentialsJson);
+} catch (error) {
+  throw new Error('Failed to parse GOOGLE_CLOUD_CREDENTIALS_JSON: ' + error.message);
+}
+
 const visionClient = new vision.ImageAnnotatorClient({
-  keyFilename: './service-account.json'
+  credentials: credentials
 });
 const googleMapsClient = new Client({});
 
